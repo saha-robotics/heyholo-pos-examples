@@ -96,36 +96,52 @@ app.MapPost("/orders", async (HttpContext context) =>
         return Results.BadRequest(new ErrorResponse { Error = "Items are required" });
     }
 
-    var orderId = $"order-{Guid.NewGuid().ToString()[..8]}";
+    string orderId;
+    OrderStatus status;
     var isAddition = !string.IsNullOrEmpty(request.ExistingOrderId);
 
-    var order = new Order
+    if (isAddition)
     {
-        Id = orderId,
-        Status = OrderStatus.Accepted,
-        Items = request.Items,
-        Note = request.Note,
-        NumberOfPeople = request.NumberOfPeople,
-        CreatedAt = DateTime.UtcNow
-    };
+        // An addition goes onto the open check it names, which keeps its id and status.
+        var existing = Database.GetOrder(request.ExistingOrderId!);
+        if (existing == null)
+        {
+            return Results.NotFound(new ErrorResponse { Error = "Existing order not found" });
+        }
 
-    Database.SaveOrder(order);
+        lock (existing.Items)
+        {
+            existing.Items.AddRange(request.Items);
+        }
+        orderId = existing.Id;
+        status = existing.Status;
+        Console.WriteLine($"Added {request.Items.Count} items to order {orderId}");
+    }
+    else
+    {
+        orderId = $"order-{Guid.NewGuid().ToString()[..8]}";
+        status = OrderStatus.Accepted;
+        Database.SaveOrder(new Order
+        {
+            Id = orderId,
+            Status = status,
+            Items = request.Items,
+            Note = request.Note,
+            NumberOfPeople = request.NumberOfPeople,
+            CreatedAt = DateTime.UtcNow
+        });
+        Console.WriteLine($"Order created: {orderId} with {request.Items.Count} items");
+    }
 
     if (!string.IsNullOrEmpty(idempotencyKey))
     {
         IdempotencyKeys[idempotencyKey] = orderId;
     }
 
-    Console.WriteLine($"✅ Order created: {orderId} with {request.Items.Count} items");
-    if (isAddition)
-    {
-        Console.WriteLine($"   Added to existing order: {request.ExistingOrderId}");
-    }
-
     return Results.Json(new CreateOrderResponse
     {
         Id = orderId,
-        Status = OrderStatus.Accepted,
+        Status = status,
         IsAddition = isAddition
     }, AppJsonSerializerContext.Default.CreateOrderResponse);
 });
@@ -180,7 +196,18 @@ app.MapPost("/orders/{id}/cancel", async (string id, HttpContext context) =>
         return Results.NotFound(new ErrorResponse { Error = "Order not found" });
     }
 
-    if (order.Status == OrderStatus.Completed || order.Status == OrderStatus.Cancelled)
+    // A second cancel is a retry, not a mistake: answer with the same known status, because
+    // HeyHolo shows a failed cancel to the venue as unconfirmed.
+    if (order.Status == OrderStatus.Cancelled)
+    {
+        return Results.Json(new OrderStatusResponse
+        {
+            Id = order.Id,
+            Status = order.Status
+        }, AppJsonSerializerContext.Default.OrderStatusResponse);
+    }
+
+    if (order.Status == OrderStatus.Completed)
     {
         return Results.BadRequest(new ErrorResponse { Error = $"Cannot cancel order with status: {order.Status}" });
     }

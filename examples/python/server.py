@@ -198,9 +198,14 @@ class POSHandler(BaseHTTPRequestHandler):
             }
 
             self._send_json(201, response)
-        except Exception as e:
-            log("ERROR", "Failed to create order", error=str(e))
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            # Only a malformed body is the caller's fault.
+            log("ERROR", "Invalid create order request", error=str(e))
             self._send_error_response(400, "Invalid request body")
+        except Exception as e:
+            # Anything else is ours and may be transient: 5xx makes HeyHolo retry.
+            log("ERROR", "Failed to create order", error=str(e))
+            self._send_error_response(500, "Internal error")
 
     def _handle_get_order(self, order_id: str) -> None:
         """Handle GET /orders/{id}"""

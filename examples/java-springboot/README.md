@@ -16,12 +16,7 @@ This is a reference implementation of a POS service that integrates with the Hey
 
 2. Run the service using Maven:
    ```bash
-   ./mvnw spring-boot:run
-   ```
-
-   Or on Windows:
-   ```bash
-   mvnw.cmd spring-boot:run
+   mvn spring-boot:run
    ```
 
 The service will start on port **5000**.
@@ -129,7 +124,7 @@ src/main/java/ai/heyholo/hpi/
 
 ### Create JAR
 ```bash
-./mvnw clean package
+mvn clean package
 ```
 
 ### Run the JAR
@@ -139,7 +134,7 @@ java -jar target/hpi-example-1.0.0.jar
 
 ### Create Docker Image (optional)
 ```bash
-./mvnw spring-boot:build-image
+mvn spring-boot:build-image
 ```
 
 ## Key Features
