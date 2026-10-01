@@ -98,7 +98,7 @@ Server runs on `http://localhost:5000`
 
 ```bash
 cd examples/java-springboot
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
 Server runs on `http://localhost:5000`

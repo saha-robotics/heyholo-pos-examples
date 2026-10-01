@@ -107,31 +107,41 @@ public class HpiController {
                     .body(new ErrorResponse("Items are required"));
         }
 
-        String orderId = "order-" + UUID.randomUUID().toString().substring(0, 8);
         boolean isAddition = request.existingOrderId() != null && !request.existingOrderId().isEmpty();
+        String orderId;
+        OrderStatus status;
 
-        StoredOrder order = new StoredOrder(
-                orderId,
-                OrderStatus.ACCEPTED,
-                request.items(),
-                request.location(),
-                request.note(),
-                request.numberOfPeople()
-        );
-
-        dataService.saveOrder(order);
-
-        logger.info("✅ Order created: {} with {} items", orderId, request.items().size());
         if (isAddition) {
-            logger.info("   Added to existing order: {}", request.existingOrderId());
+            // An addition goes onto the open check it names, which keeps its id and status.
+            StoredOrder existing = dataService.getOrder(request.existingOrderId()).orElse(null);
+            if (existing == null) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(new ErrorResponse("Existing order not found"));
+            }
+            existing.addItems(request.items());
+            orderId = existing.getId();
+            status = existing.getStatus();
+            logger.info("Added {} items to order {}", request.items().size(), orderId);
+        } else {
+            orderId = "order-" + UUID.randomUUID().toString().substring(0, 8);
+            status = OrderStatus.ACCEPTED;
+            dataService.saveOrder(new StoredOrder(
+                    orderId,
+                    status,
+                    request.items(),
+                    request.location(),
+                    request.note(),
+                    request.numberOfPeople()
+            ));
+            logger.info("Order created: {} with {} items", orderId, request.items().size());
         }
 
         if (idempotencyKey != null && !idempotencyKey.isEmpty()) {
             idempotencyKeys.put(idempotencyKey, orderId);
         }
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new CreateOrderResponse(orderId, OrderStatus.ACCEPTED, isAddition));
+        return ResponseEntity.status(isAddition ? HttpStatus.OK : HttpStatus.CREATED)
+                .body(new CreateOrderResponse(orderId, status, isAddition));
     }
 
     @GetMapping("/orders/{id}")
@@ -172,7 +182,12 @@ public class HpiController {
 
         return dataService.getOrder(id)
                 .<ResponseEntity<?>>map(order -> {
-                    if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
+                    // A second cancel is a retry, not a mistake: answer with the same known status,
+                    // because HeyHolo shows a failed cancel to the venue as unconfirmed.
+                    if (order.getStatus() == OrderStatus.CANCELLED) {
+                        return ResponseEntity.ok(new OrderStatusResponse(order.getId(), order.getStatus()));
+                    }
+                    if (order.getStatus() == OrderStatus.COMPLETED) {
                         return ResponseEntity.badRequest()
                                 .body(new ErrorResponse("Cannot cancel order with status: " + order.getStatus().getValue()));
                     }
